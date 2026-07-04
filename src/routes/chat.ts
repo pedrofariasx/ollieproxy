@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyReply } from 'fastify';
 import { ChatCompletionRequest } from '../schemas.js';
 import { config } from '../config.js';
 import { StreamTransformer, UpstreamChunk } from '../utils/stream.js';
+import { parseModel, thinkingToUpstream, ThinkingLevel } from '../utils/model.js';
 
 const CHAT_URL = `${config.upstreamUrl}/api/chat`;
 
@@ -29,8 +30,14 @@ export async function chatRoutes(app: FastifyInstance) {
     const body = parseResult.data;
     const isStream = body.stream;
 
+    // Thinking level: explicit `reasoning_effort` in the body wins; otherwise it
+    // is derived from the model-name suffix (e.g. `claude-fable-5-max` -> max).
+    const { baseModel, thinking: suffixThinking } = parseModel(body.model);
+    const thinking: ThinkingLevel = body.reasoning_effort ?? suffixThinking;
+    const upstreamEffort = thinkingToUpstream(thinking);
+
     const upstreamBody: Record<string, unknown> = {
-      model: body.model,
+      model: baseModel,
       messages: body.messages,
       stream: true,
     };
@@ -40,8 +47,8 @@ export async function chatRoutes(app: FastifyInstance) {
       upstreamBody.tool_choice = body.tool_choice || 'auto';
     }
 
-    if (body.reasoning_effort) {
-      upstreamBody.reasoning_effort = body.reasoning_effort;
+    if (upstreamEffort) {
+      upstreamBody.reasoning_effort = upstreamEffort;
     }
 
     if (body.max_tokens) upstreamBody.max_tokens = body.max_tokens;

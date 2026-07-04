@@ -63,7 +63,7 @@ export const ChatCompletionRequest = z.object({
       function: z.object({ name: z.string() }),
     }),
   ]).optional(),
-  reasoning_effort: z.enum(['low', 'medium', 'high', 'xhigh']).optional(),
+  reasoning_effort: z.enum(['off', 'low', 'medium', 'high', 'max']).optional(),
   stream_options: StreamOptions.optional(),
   user: z.string().optional(),
   n: z.number().int().positive().optional(),
