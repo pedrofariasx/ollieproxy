@@ -1,8 +1,9 @@
 import { FastifyInstance, FastifyReply } from 'fastify';
-import { ChatCompletionRequest } from '../schemas.js';
+import { ChatCompletionRequest, ChatCompletionRequestType, ChatMessageType } from '../schemas.js';
 import { config } from '../config.js';
 import { StreamTransformer, UpstreamChunk } from '../utils/stream.js';
 import { parseModel, thinkingToUpstream, ThinkingLevel } from '../utils/model.js';
+import { Redactor } from '../utils/redact.js';
 
 const CHAT_URL = `${config.upstreamUrl}/api/chat`;
 
@@ -46,9 +47,19 @@ export async function chatRoutes(app: FastifyInstance) {
     const thinking: ThinkingLevel = body.reasoning_effort ?? suffixThinking;
     const upstreamEffort = thinkingToUpstream(thinking);
 
+    // Layer 1: build a request-scoped redactor and rewrite any PII in the
+    // outbound messages before they reach the upstream. The same redactor
+    // produces the restorer used to put originals back into the response.
+    const redactor = config.redact.enabled
+      ? new Redactor(config.redact.categories)
+      : null;
+    const messagesForUpstream = redactor
+      ? redactMessages(body.messages, redactor)
+      : body.messages;
+
     const upstreamBody: Record<string, unknown> = {
       model: baseModel,
-      messages: body.messages,
+      messages: messagesForUpstream,
       stream: true,
     };
 
@@ -119,10 +130,16 @@ export async function chatRoutes(app: FastifyInstance) {
     }
 
     if (isStream) {
-      return handleStreaming(upstreamResponse, reply, body.stream_options?.include_usage, ac.signal);
+      return handleStreaming(
+        upstreamResponse,
+        reply,
+        body.stream_options?.include_usage,
+        ac.signal,
+        redactor?.buildRestorer() ?? null,
+      );
     }
 
-    return handleNonStreaming(upstreamResponse, reply, ac.signal);
+    return handleNonStreaming(upstreamResponse, reply, ac.signal, redactor?.buildRestorer() ?? null);
   });
 }
 
@@ -131,6 +148,7 @@ async function handleStreaming(
   reply: FastifyReply,
   includeUsage?: boolean,
   abortSignal?: AbortSignal,
+  restorer: import('../utils/redact.js').Restorer | null = null,
 ) {
   const raw = reply.raw;
   raw.writeHead(200, {
@@ -150,6 +168,7 @@ async function handleStreaming(
   }
   const decoder = new TextDecoder();
   const transformer = new StreamTransformer();
+  if (restorer) transformer.setRestorer(restorer);
   let buffer = '';
 
   try {
@@ -193,6 +212,13 @@ async function handleStreaming(
         }
       }
     }
+
+    // End-of-stream: release any text the PII restorer held back for a token
+    // that may have been split across chunks.
+    if (restorer) {
+      const flushed = transformer.flushRestorer();
+      if (flushed) raw.write(`data: ${JSON.stringify(flushed)}\n\n`);
+    }
   } catch (err: unknown) {
     if (abortSignal?.aborted) {
       // Client disconnected; suppress the error and stop the stream.
@@ -215,6 +241,7 @@ async function handleNonStreaming(
   upstreamResponse: Response,
   reply: FastifyReply,
   abortSignal?: AbortSignal,
+  restorer: import('../utils/redact.js').Restorer | null = null,
 ) {
   const reader = upstreamResponse.body?.getReader();
   if (!reader) {
@@ -311,9 +338,12 @@ async function handleNonStreaming(
       function: { name: t.function.name, arguments: t.function.arguments },
     }));
 
+  // Restore redacted PII tokens to their originals in the assembled content.
+  const restoredContent = restorer ? restorer.restoreAll(finalContent) : finalContent;
+
   const message: Record<string, unknown> = {
     role: 'assistant',
-    content: finalContent || null,
+    content: restoredContent || null,
   };
 
   if (finalReasoning) {
@@ -370,4 +400,47 @@ async function readLimited(response: Response, limit: number): Promise<string> {
     try { await reader.cancel(); } catch { /* ignore */ }
   }
   return out.length > limit ? out.slice(0, limit) : out;
+}
+
+/**
+ * Walks the request `messages` and redacts PII from every textual part: the
+ * plain `content` string, each `text` part of a multipart `content`, and the
+ * `tool_calls.function.arguments` JSON string (best-effort — arguments may be
+ * arbitrary JSON, so we redact the raw string before it's re-stringified by the
+ * upstream). Returns a new messages array; the input is not mutated.
+ *
+ * Tool-message `content` is also redacted since assistant tool results can
+ * echo PII back.
+ */
+function redactMessages(
+  messages: ChatCompletionRequestType['messages'],
+  redactor: Redactor,
+): ChatCompletionRequestType['messages'] {
+  return messages.map((msg: ChatMessageType) => {
+    const out: Record<string, unknown> = { ...msg };
+
+    if (typeof msg.content === 'string') {
+      out.content = redactor.redact(msg.content);
+    } else if (Array.isArray(msg.content)) {
+      out.content = msg.content.map((part) =>
+        part.type === 'text' ? { ...part, text: redactor.redact(part.text) } : part,
+      );
+    }
+
+    if (msg.tool_calls) {
+      out.tool_calls = msg.tool_calls.map((tc) => ({
+        ...tc,
+        function: {
+          ...tc.function,
+          arguments: redactor.redact(tc.function.arguments),
+        },
+      }));
+    }
+
+    if (typeof msg.name === 'string') {
+      out.name = redactor.redact(msg.name);
+    }
+
+    return out as ChatMessageType;
+  });
 }

@@ -158,6 +158,36 @@ export class StreamTransformer {
   private currentId = '';
   private currentModel = '';
   private currentCreated = 0;
+  /** Optional PII restorer applied to `content` after think parsing. */
+  private restorer: import('./redact.js').Restorer | null = null;
+
+  /**
+   * Attaches a PII restorer. When set, every `content` delta emitted by
+   * `transform()` is run through `Restorer.push()` so redaction tokens are
+   * swapped back for the originals. Call `flush()` at end-of-stream to release
+   * any buffered tail held back for split tokens.
+   */
+  setRestorer(restorer: import('./redact.js').Restorer): void {
+    this.restorer = restorer;
+  }
+
+  /**
+   * Releases any text held back by the PII restorer's lookahead buffer. Returns
+   * a partial `content` delta to emit, or `null` when there is nothing to flush.
+   */
+  flushRestorer(): UpstreamChunk | null {
+    if (!this.restorer) return null;
+    const tail = this.restorer.flush();
+    if (!tail) return null;
+    return {
+      id: this.currentId,
+      object: 'chat.completion.chunk',
+      created: this.currentCreated || Math.floor(Date.now() / 1000),
+      model: this.currentModel,
+      choices: [{ index: 0, delta: { content: tail }, finish_reason: null }],
+      usage: null,
+    };
+  }
 
   transform(chunk: UpstreamChunk): UpstreamChunk | null {
     if (!chunk || !chunk.choices || chunk.choices.length === 0) {
@@ -198,7 +228,12 @@ export class StreamTransformer {
         newDelta.reasoning_content = (newDelta.reasoning_content || '') + parsed.reasoning;
       }
       if (parsed.content) {
-        newDelta.content = parsed.content;
+        // Restore redacted PII tokens to their originals before emitting. The
+        // restorer holds a tiny lookahead tail when a token could be split
+        // across chunks; the remainder is flushed at end-of-stream.
+        newDelta.content = this.restorer
+          ? this.restorer.push(parsed.content)
+          : parsed.content;
       }
     }
 
@@ -234,5 +269,6 @@ export class StreamTransformer {
     this.currentId = '';
     this.currentModel = '';
     this.currentCreated = 0;
+    this.restorer = null;
   }
 }

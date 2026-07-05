@@ -8,6 +8,13 @@ async function main() {
     await app.listen({ port: config.port, host: config.host });
     app.log.info(`OllieProxy running at http://${config.host}:${config.port}`);
     app.log.info(`Upstream: ${config.upstreamUrl}`);
+    if (config.redact.enabled) {
+      app.log.info(
+        `PII redaction ON (categories: ${config.redact.categories.join(', ') || '(none)'})`,
+      );
+    } else {
+      app.log.info('PII redaction off');
+    }
     app.log.info(`Models: GET  http://localhost:${config.port}/v1/models`);
     app.log.info(`Chat:   POST http://localhost:${config.port}/v1/chat/completions`);
   } catch (err) {

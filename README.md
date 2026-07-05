@@ -11,6 +11,7 @@ Um proxy compatível com a API da OpenAI que traduz requisições para o backend
 - **Parsing de `[[think]]`**: blocos de raciocínio embutidos no `content` são extraídos para `reasoning_content`
 - **Resiliência**: aborta o upstream quando o cliente desconecta, timeout configurável, limite de corpo
 - **Health checks**: `GET /health` e `GET /v1/health`
+- **Redação reversível de PII (Layer 1)**: dados identificáveis nas mensagens de entrada são substituídos por tokens opacos antes de chegar ao upstream e restaurados na resposta de volta ao cliente — ativo por padrão, desligável via `REDACT_PII=0`
 
 ## Requisitos
 
@@ -50,6 +51,8 @@ Todas as configurações são via variáveis de ambiente:
 | `UPSTREAM_URL` | `https://olliechat-sw02.onrender.com` | URL base do backend OllieChat |
 | `UPSTREAM_TIMEOUT_MS` | `120000` | Timeout da requisição ao upstream (ms) |
 | `BODY_LIMIT_BYTES` | `4194304` | Limite de corpo da requisição (bytes) |
+| `REDACT_PII` | `1` | Ativa a redação reversível de PII (`1`/`true`/`on` para ligar, `0`/`false`/`off` para desligar). Ativa por padrão |
+| `REDACT_CATEGORIES` | *(padrão)* | Lista CSV de categorias quando `REDACT_PII=1`, ou `all` para todas. Default = sensíveis + baixo falso-positivo; `all` adiciona as opt-in de FP mais alto |
 
 ## Endpoints
 
@@ -99,6 +102,56 @@ Retorna os detalhes de um modelo específico.
 
 Retorna `{"status":"ok"}`.
 
+## Redação reversível de PII (Layer 1)
+
+Quando `REDACT_PII=1` (ativo por padrão), o proxy inspeciona as mensagens de entrada em busca de dados identificáveis e os substitui por tokens opacos (`<<PII_EMAIL_1>>`, `<<PII_PHONE_1>>`, …) **antes** de enviá-las ao upstream. Na resposta (streaming ou não), os tokens são restaurados para os valores originais antes de chegarem ao cliente. Para desativar, use `REDACT_PII=0`.
+
+O objetivo é proteger PII mesmo contra um upstream malicioso, sem degradar a resposta do modelo: o mesmo valor sempre mapeia para o mesmo token dentro de uma requisição, então o modelo continua conseguindo raciocinar sobre "o mesmo email aparecendo duas vezes".
+
+Categorias suportadas (configuráveis via `REDACT_CATEGORIES`):
+
+**No padrão** (ativadas com `REDACT_PII=1` sem `REDACT_CATEGORIES`) — alta sensibilidade, baixo falso-positivo:
+
+| Categoria | Detecta | Validação |
+| --- | --- | --- |
+| `email` | endereços `user@host.tld` | — |
+| `phone` | números nacionais/internacionais com DDD, `+`, espaços, `-`, `.` | mínimo de 8 dígitos |
+| `cpf` | 11 dígitos, com ou sem formatação | dígitos verificadores |
+| `cnpj` | 14 dígitos, com ou sem formatação | dígitos verificadores |
+| `apikey` | `sk-…`, `sk-ant-…`, `ghp_…`, `xox…`, `AIza…`, hex 32+, alnum 40+ | — |
+| `card` | 13–19 dígitos agrupados | checksum de Luhn |
+| `dburl` | connection strings com senha (`postgres://user:pass@host/db`) | requer senha embutida |
+| `jwt` | três segmentos base64url (`ey…`) | — |
+| `privatekey` | blocos PEM `-----BEGIN … PRIVATE KEY-----` | — |
+| `aws` | access key id (`AKIA…` etc.) e secret access key (40 chars) | heurística de secret |
+
+**Opt-in** (risco de falso-positivo em prosa comum — use `REDACT_CATEGORIES=all` ou liste explicitamente):
+
+| Categoria | Detecta | Validação |
+| --- | --- | --- |
+| `ip` | IPv4 e IPv6 (incl. `::` comprimido) | octetos 0–255, sem zero à esquerda |
+| `mac` | endereços Ethernet `aa:bb:cc:dd:ee:ff` | — |
+| `cep` | CEP brasileiro `XXXXX-XXX` | 8 dígitos |
+| `pis` | PIS/NIT brasileiro (11 dígitos) | dígito verificador |
+| `ssn` | SSN americano `XXX-XX-XXXX` | regras da SSA (área/grupo/serial) |
+| `token` | `Bearer <v>`, `token=`, `api_key=`, `password=` etc. | redige só o valor após a palavra-chave |
+
+A correspondência token ↔ original vive apenas em memória pelo tempo de vida da requisição e nunca é persistida ou logada. No modo streaming, a restauração usa um buffer de lookahead para recompor tokens que cheguem splitados entre chunks.
+
+```bash
+# Padrão (sensíveis + baixo FP) — já ativo sem configurar nada
+npm start
+
+# Tudo, inclusive as opt-in de FP mais alto
+REDACT_PII=1 REDACT_CATEGORIES=all npm start
+
+# Seleção explícita
+REDACT_PII=1 REDACT_CATEGORIES=email,phone,dburl,jwt npm start
+
+# Desativar
+REDACT_PII=0 npm start
+```
+
 ## Níveis de Thinking
 
 Os níveis de raciocínio podem ser definidos de duas formas (com precedência para `reasoning_effort` explícito):
@@ -141,7 +194,8 @@ src/
     models.ts     # /v1/models
   utils/
     model.ts      # Parse de sufixo de thinking + mapeamento upstream
-    stream.ts     # ThinkParser incremental + StreamTransformer
+    stream.ts     # ThinkParser incremental + StreamTransformer (+ restauração PII)
+    redact.ts     # Layer 1: Redactor/Restorer + padrões e validadores (CPF/CNPJ/Luhn)
 ```
 
 ## Scripts
