@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs for the same ref when a new push lands.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Typecheck, build, and Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Typecheck & build (tsc)
+        run: npm run build
+
+      - name: Smoke test (server boots, /health ok)
+        run: |
+          node dist/index.js &
+          SERVER_PID=$!
+          # Wait for the port to accept connections (up to 10s).
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:3000/health >/dev/null; then
+              echo "Health check passed"
+              kill $SERVER_PID
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "Health check failed" >&2
+          kill $SERVER_PID 2>/dev/null || true
+          exit 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: ollieproxy:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test Docker image
+        run: |
+          docker run -d --name ollieproxy-ci -p 3001:3000 ollieproxy:ci
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:3001/health >/dev/null; then
+              echo "Docker health check passed"
+              docker logs ollieproxy-ci
+              docker stop ollieproxy-ci >/dev/null
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "Docker health check failed" >&2
+          docker logs ollieproxy-ci
+          docker stop ollieproxy-ci >/dev/null || true
+          exit 1

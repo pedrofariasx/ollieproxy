@@ -40,6 +40,26 @@ npm start
 
 O servidor sobe por padrão em `http://0.0.0.0:3000`.
 
+### Docker
+
+A imagem multi-stage compila o TypeScript, poda dependências de dev e roda como usuário não-root (`app`) em `node:22-alpine`.
+
+```bash
+# Build
+docker build -t ollieproxy .
+
+# Run (redação de PII já vem ativa por padrão)
+docker run -d --name ollieproxy -p 3000:3000 ollieproxy
+
+# Desativar a redação, trocar upstream, etc. — sobrescreva as envs
+docker run -d --name ollieproxy -p 3000:3000 \
+  -e REDACT_PII=0 \
+  -e UPSTREAM_URL=https://meu-backend.example.com \
+  ollieproxy
+```
+
+A imagem expõe a porta `3000` e aceita todas as variáveis listadas abaixo.
+
 ## Configuração
 
 Todas as configurações são via variáveis de ambiente:
@@ -205,3 +225,12 @@ src/
 | `npm run dev` | Modo desenvolvimento com watch (`tsx watch`) |
 | `npm run build` | Compila TypeScript para `dist/` |
 | `npm start` | Executa o build de produção |
+
+## CI
+
+O workflow em `.github/workflows/ci.yml` roda a cada push/PR no `main`:
+
+- `npm ci` + `npm run build` (typecheck + compilação)
+- Smoke test do servidor nativo contra `GET /health`
+- Build da imagem Docker (com cache GHA)
+- Smoke test do container contra `GET /health`

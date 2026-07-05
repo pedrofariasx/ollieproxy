@@ -1,0 +1,18 @@
+# Anything not needed at build/runtime keeps the image small and the context fast.
+.git
+.gitignore
+.github
+dist
+node_modules
+.env
+.env.*
+!.env.example
+*.log
+npm-debug.log*
+.DS_Store
+.idea
+.vscode
+*.swp
+README.md
+Dockerfile
+.dockerignore
