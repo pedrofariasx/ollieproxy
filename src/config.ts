@@ -98,4 +98,6 @@ export const config = {
     keysFile: process.env.KEYS_FILE || './data/keys.json',
     defaultRpm: intEnv('DEFAULT_RPM', 60),
   },
+  /** Cache TTL for upstream models (ms). */
+  modelsCacheTtlMs: intEnv('MODELS_CACHE_TTL_MS', 300_000),
 } as const;

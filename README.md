@@ -76,6 +76,7 @@ Todas as configurações são via variáveis de ambiente:
 | `AUTH_ENABLED` | `0` | Exige API key em `/v1/*` (`/health` continua liberado). OFF por padrão — crie chaves antes de ligar |
 | `KEYS_FILE` | `./data/keys.json` | Arquivo onde as chaves (hasheadas) são guardadas |
 | `DEFAULT_RPM` | `60` | Limite padrão de requisições por minuto por chave. Cada chave pode sobrescrever via `--rpm` |
+| `MODELS_CACHE_TTL_MS` | `300000` | TTL do cache da lista de modelos do upstream (ms) |
 
 ## Endpoints
 
@@ -244,17 +245,9 @@ Os níveis de raciocínio podem ser definidos de duas formas (com precedência p
 
 ## Modelos
 
-Os modelos base disponíveis (cada um exposto também com sufixos `-low`, `-medium`, `-high`, `-max`):
+Os modelos são obtidos dinamicamente do upstream em `GET {upstream}/v1/models`. Cada modelo base é exposto também com sufixos de nível de thinking: `-low`, `-medium`, `-high`, `-max`.
 
-- `claude-fable-5` (anthropic)
-- `claude-sonnet-5` (anthropic)
-- `claude-opus-4-8` (anthropic)
-- `glm-5.2` (zhipu)
-- `glm-5.2-fast` (zhipu)
-- `deepseek-v4-pro` (deepseek)
-- `kimi-k2.7-code` (moonshot)
-- `minimax-m3` (minimax)
-- `qwen-3.7-plus` (alibaba)
+O proxy cacheia a lista por `MODELS_CACHE_TTL_MS` (default 5 minutos). Em caso de falha, o cache expirado é servido; se não houver cache, retorna lista vazia.
 
 ## Estrutura do projeto
 
@@ -269,6 +262,7 @@ src/
     models.ts     # /v1/models
   utils/
     model.ts      # Parse de sufixo de thinking + mapeamento upstream
+    upstream-models.ts  # Fetch + cache da lista de modelos do upstream
     stream.ts     # ThinkParser incremental + StreamTransformer (+ restauração PII)
     redact.ts     # Layer 1: Redactor/Restorer + padrões e validadores (CPF/CNPJ/Luhn)
   keys/
