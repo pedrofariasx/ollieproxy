@@ -68,7 +68,7 @@ Todas as configurações são via variáveis de ambiente:
 | --- | --- | --- |
 | `PORT` | `3000` | Porta de escuta |
 | `HOST` | `0.0.0.0` | Host de escuta |
-| `UPSTREAM_URL` | `https://olliechat-sw02.onrender.com` | URL base do backend OllieChat |
+| `UPSTREAM_URL` | `https://olliechat-lac.vercel.app/` | URL base do backend OllieChat |
 | `UPSTREAM_TIMEOUT_MS` | `120000` | Timeout da requisição ao upstream (ms) |
 | `BODY_LIMIT_BYTES` | `4194304` | Limite de corpo da requisição (bytes) |
 | `REDACT_PII` | `1` | Ativa a redação reversível de PII (`1`/`true`/`on` para ligar, `0`/`false`/`off` para desligar). Ativa por padrão |
