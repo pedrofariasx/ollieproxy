@@ -10,7 +10,8 @@
     "dev": "tsx watch src/index.ts",
     "key:create": "node dist/keys/cli.js create",
     "key:list": "node dist/keys/cli.js list",
-    "key:revoke": "node dist/keys/cli.js revoke"
+    "key:revoke": "node dist/keys/cli.js revoke",
+    "key:remove": "node dist/keys/cli.js remove"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",

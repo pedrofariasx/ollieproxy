@@ -194,6 +194,9 @@ npm run key:list
 
 # Revoga pelo id (efeito imediato, sem restart)
 npm run key:revoke -- <id>
+
+# Remove definitivamente pelo id (hard-delete, irreversível)
+npm run key:remove -- <id>
 ```
 
 Em produção, rode o CLI dentro do container apontando para o diretório de dados. No Railway, anexe um **Volume** ao path `/app/data` e rode:
@@ -220,7 +223,8 @@ Clientes enviam a key no header `Authorization: Bearer op_…`. Sem key → `401
 ### Detalhes
 
 - As chaves são armazenadas somente como hash, então um `keys.json` vazado não expõe credenciais usáveis. O plaintext é mostrado apenas no momento da criação.
-- A revogação/criação de chaves via CLI surte efeito sem reiniciar o serviço: o proxy recarrega o arquivo quando seu mtime muda.
+- A revogação/criação/remoção de chaves via CLI surte efeito sem reiniciar o serviço: o proxy recarrega o arquivo quando seu mtime muda.
+- `revoke` desativa a chave suavemente (verificação falha, mas o registro continua no arquivo e aparece em `list`). `remove` apaga o registro do `keys.json` definitivamente — irreversível.
 - O rate limit é por chave, em janela fixa de 60s, em memória (reseta no restart). Para anti-abuso isso é suficiente: nenhum atacante excede `rpm` de forma sustentada.
 
 ## Níveis de Thinking
@@ -272,7 +276,7 @@ src/
     auth.ts       # Verificação de bearer + reload por mtime
     ratelimit.ts  # Rate limiter in-memory por chave (janela fixa de RPM)
     plugin.ts     # Hook preHandler: auth + rate limit no Fastify
-    cli.ts        # CLI key:create / key:list / key:revoke
+    cli.ts        # CLI key:create / key:list / key:revoke / key:remove
 ```
 
 ## Scripts
@@ -282,6 +286,10 @@ src/
 | `npm run dev` | Modo desenvolvimento com watch (`tsx watch`) |
 | `npm run build` | Compila TypeScript para `dist/` |
 | `npm start` | Executa o build de produção |
+| `npm run key:create` | Cria uma API key (`--label`, `--rpm`, `--expires-in`) |
+| `npm run key:list` | Lista todas as chaves (id, status, rpm, expiração, label) |
+| `npm run key:revoke` | Revoga uma chave pelo id (soft, reversível criando de novo) |
+| `npm run key:remove` | Remove uma chave pelo id do `keys.json` (hard-delete, irreversível) |
 
 ## CI
 

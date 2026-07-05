@@ -142,6 +142,20 @@ export class KeyStore {
     await this.save(store);
     return rec;
   }
+
+  /**
+   * Hard-deletes a key record by id (irreversible). Unlike `revoke`, the row is
+   * removed from `keys.json` and disappears from `list`. Returns the removed
+   * record, or `null` if no key has that id.
+   */
+  async remove(id: string): Promise<KeyRecord | null> {
+    const store = await this.load();
+    const idx = store.keys.findIndex((k) => k.id === id);
+    if (idx === -1) return null;
+    const [removed] = store.keys.splice(idx, 1);
+    await this.save(store);
+    return removed;
+  }
 }
 
 /* -------------------------------------------------------------------------- */

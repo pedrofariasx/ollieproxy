@@ -4,6 +4,10 @@
  *   node dist/keys/cli.js create --label=acme --rpm=60 [--expires-in=30d]
  *   node dist/keys/cli.js list
  *   node dist/keys/cli.js revoke <id>
+ *   node dist/keys/cli.js remove <id>
+ *
+ * `revoke` soft-disables a key (verification fails, but it stays in the store
+ * and `list`). `remove` hard-deletes the record from keys.json — irreversible.
  *
  * Uses the same config as the server (KEYS_FILE via env). Exit codes: 0 on
  * success, 1 on usage error, 2 on not-found.
@@ -17,6 +21,7 @@ function usage(): never {
       '  cli create --label=<text> [--rpm=<n>] [--expires-in=<Nd|Nh|Nm>]',
       '  cli list',
       '  cli revoke <id>',
+      '  cli remove <id>   # hard-delete (irreversible)',
     ].join('\n'),
   );
   process.exit(1);
@@ -101,6 +106,18 @@ async function main(): Promise<void> {
       process.exit(2);
     }
     console.log(`Revoked ${rec.id} (${rec.label})`);
+    return;
+  }
+
+  if (cmd === 'remove') {
+    const id = rest[0];
+    if (!id) usage();
+    const rec = await store.remove(id);
+    if (!rec) {
+      console.error(`No key with id "${id}"`);
+      process.exit(2);
+    }
+    console.log(`Removed ${rec.id} (${rec.label})`);
     return;
   }
 
