@@ -100,4 +100,8 @@ export const config = {
   },
   /** Cache TTL for upstream models (ms). */
   modelsCacheTtlMs: intEnv('MODELS_CACHE_TTL_MS', 300_000),
+  /** URL for status endpoint (model health checks). */
+  statusUrl: process.env.STATUS_URL || 'https://sh00t.host/api/status',
+  /** Cache TTL for status endpoint (ms). */
+  statusCacheTtlMs: intEnv('STATUS_CACHE_TTL_MS', 30_000),
 } as const;

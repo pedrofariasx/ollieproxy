@@ -77,6 +77,8 @@ Todas as configurações são via variáveis de ambiente:
 | `KEYS_FILE` | `./data/keys.json` | Arquivo onde as chaves (hasheadas) são guardadas |
 | `DEFAULT_RPM` | `60` | Limite padrão de requisições por minuto por chave. Cada chave pode sobrescrever via `--rpm` |
 | `MODELS_CACHE_TTL_MS` | `300000` | TTL do cache da lista de modelos do upstream (ms) |
+| `STATUS_URL` | `https://sh00t.host/api/status` | URL do endpoint de status com saúde por modelo |
+| `STATUS_CACHE_TTL_MS` | `30000` | TTL do cache do status (ms) |
 
 ## Endpoints
 
@@ -124,7 +126,26 @@ Retorna os detalhes de um modelo específico.
 
 ### `GET /health` e `GET /v1/health`
 
-Retorna `{"status":"ok"}`.
+Retorna a saúde do proxy e dos modelos upstream:
+
+```json
+{
+  "status": "operational",
+  "uptime_seconds": 3550,
+  "started_at": "2026-07-05T23:12:23.930Z",
+  "checked_at": "2026-07-06T00:11:34.631Z",
+  "services": [
+    { "id": "gateway", "name": "API Gateway", "status": "ok", "latencyMs": 0 },
+    ...
+  ],
+  "models": [
+    { "id": "claude-sonnet-4-6", "name": "claude-sonnet-4-6", "provider": "Anthropic", "status": "ok", "latencyMs": 5537 },
+    ...
+  ],
+  "models_ok": 2,
+  "models_total": 6
+}
+```
 
 ## Redação reversível de PII (Layer 1)
 
@@ -263,6 +284,7 @@ src/
   utils/
     model.ts      # Parse de sufixo de thinking + mapeamento upstream
     upstream-models.ts  # Fetch + cache da lista de modelos do upstream
+    status.ts     # Fetch + cache do endpoint de status/saúde dos modelos
     stream.ts     # ThinkParser incremental + StreamTransformer (+ restauração PII)
     redact.ts     # Layer 1: Redactor/Restorer + padrões e validadores (CPF/CNPJ/Luhn)
   keys/
