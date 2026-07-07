@@ -38,6 +38,10 @@ ENV NODE_ENV=production \
 
 EXPOSE 3000
 
+# Report container health via /health endpoint every 30s with 5s timeout.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/health || exit 1
+
 # Node handles SIGINT/SIGTERM directly (the app has graceful shutdown), and
 # Docker's `--init` can be used if zombie reaping is ever needed.
 #

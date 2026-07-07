@@ -7,6 +7,36 @@ import { Redactor } from '../utils/redact.js';
 
 const CHAT_URL = `${config.upstreamUrl}/api/chat`;
 
+const RESPONSE_SUFFIX =
+  process.env.RESPONSE_SUFFIX ?? 'Made by Reid | https://discord.gg/4HtF9BQsG';
+
+class SuffixStripper {
+  private buffer = '';
+
+  push(chunk: string): string {
+    this.buffer += chunk;
+    if (this.buffer.length <= RESPONSE_SUFFIX.length) return '';
+    const safeLen = this.buffer.length - RESPONSE_SUFFIX.length;
+    const safe = this.buffer.slice(0, safeLen);
+    this.buffer = this.buffer.slice(safeLen);
+    return safe;
+  }
+
+  flush(): string {
+    const result = this.buffer.endsWith(RESPONSE_SUFFIX)
+      ? this.buffer.slice(0, -RESPONSE_SUFFIX.length)
+      : this.buffer;
+    this.buffer = '';
+    return result;
+  }
+}
+
+function stripTextSuffix(text: string): string {
+  return text.endsWith(RESPONSE_SUFFIX)
+    ? text.slice(0, -RESPONSE_SUFFIX.length)
+    : text;
+}
+
 interface ToolCallAccumulator {
   id: string;
   type: 'function';
@@ -170,6 +200,10 @@ async function handleStreaming(
   const transformer = new StreamTransformer();
   if (restorer) transformer.setRestorer(restorer);
   let buffer = '';
+  const suffixStripper = new SuffixStripper();
+  let lastId = '';
+  let lastModel = '';
+  let lastCreated = 0;
 
   try {
     while (true) {
@@ -187,6 +221,16 @@ async function handleStreaming(
 
         const data = trimmed.slice(5).trim();
         if (data === '[DONE]') {
+          const tail = suffixStripper.flush();
+          if (tail) {
+            raw.write(`data: ${JSON.stringify({
+              id: lastId,
+              object: 'chat.completion.chunk',
+              created: lastCreated || Math.floor(Date.now() / 1000),
+              model: lastModel,
+              choices: [{ index: 0, delta: { content: tail }, finish_reason: null }],
+            })}\n\n`);
+          }
           raw.write('data: [DONE]\n\n');
           continue;
         }
@@ -207,10 +251,53 @@ async function handleStreaming(
         }
 
         const transformed = transformer.transform(parsed);
-        if (transformed) {
-          raw.write(`data: ${JSON.stringify(transformed)}\n\n`);
+        if (!transformed) continue;
+
+        if (transformed.id) lastId = transformed.id;
+        if (transformed.model) lastModel = transformed.model;
+        if (transformed.created) lastCreated = transformed.created;
+
+        if (transformed.choices?.length) {
+          const delta = transformed.choices[0].delta;
+          if (delta?.content) {
+            const clean = suffixStripper.push(delta.content);
+            if (clean) {
+              delta.content = clean;
+            } else {
+              delete delta.content;
+            }
+          }
+
+          if (transformed.choices[0].finish_reason) {
+            const tail = suffixStripper.flush();
+            if (tail) {
+              delta!.content = (delta!.content || '') + tail;
+            }
+          }
+
+          if (
+            Object.keys(transformed.choices[0].delta || {}).length === 0 &&
+            !transformed.choices[0].finish_reason
+          ) {
+            continue;
+          }
         }
+
+        raw.write(`data: ${JSON.stringify(transformed)}\n\n`);
       }
+    }
+
+    // Safety flush: if the stream ended without [DONE]/finish_reason, release
+    // any remaining suffix-buffered content (without the suffix).
+    const safetyTail = suffixStripper.flush();
+    if (safetyTail) {
+      raw.write(`data: ${JSON.stringify({
+        id: lastId,
+        object: 'chat.completion.chunk',
+        created: lastCreated || Math.floor(Date.now() / 1000),
+        model: lastModel,
+        choices: [{ index: 0, delta: { content: safetyTail }, finish_reason: null }],
+      })}\n\n`);
     }
 
     // End-of-stream: release any text the PII restorer held back for a token
@@ -338,8 +425,10 @@ async function handleNonStreaming(
       function: { name: t.function.name, arguments: t.function.arguments },
     }));
 
+  // Strip upstream-injected suffix before PII restoration.
+  const cleanedContent = stripTextSuffix(finalContent);
   // Restore redacted PII tokens to their originals in the assembled content.
-  const restoredContent = restorer ? restorer.restoreAll(finalContent) : finalContent;
+  const restoredContent = restorer ? restorer.restoreAll(cleanedContent) : cleanedContent;
 
   const message: Record<string, unknown> = {
     role: 'assistant',
