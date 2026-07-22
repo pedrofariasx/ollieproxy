@@ -1,12 +1,23 @@
 import { config } from '../config.js';
 
-const SUFFIX_LEVELS = ['low', 'medium', 'high', 'max'] as const;
-
 interface UpstreamModel {
   id: string;
   object: string;
   created: number;
   owned_by: string;
+}
+
+interface RawUpstreamModel {
+  id: string;
+  name: string;
+  brand: string;
+  vision: boolean;
+  disabled: boolean;
+  provider: string;
+}
+
+interface RawModelsResponse {
+  models: RawUpstreamModel[];
 }
 
 interface CacheEntry {
@@ -29,27 +40,14 @@ async function fetchFromUpstream(): Promise<UpstreamModel[]> {
     throw new Error(`Upstream models endpoint returned ${res.status}`);
   }
 
-  const json = (await res.json()) as { data: UpstreamModel[] };
-  return json.data ?? [];
-}
-
-function expandWithVariants(baseModels: UpstreamModel[]): UpstreamModel[] {
-  const out: UpstreamModel[] = [];
-
-  for (const m of baseModels) {
-    out.push({ ...m });
-
-    for (const lvl of SUFFIX_LEVELS) {
-      out.push({
-        id: `${m.id}-${lvl}`,
-        object: 'model',
-        created: m.created,
-        owned_by: m.owned_by,
-      });
-    }
-  }
-
-  return out;
+  const json = (await res.json()) as RawModelsResponse;
+  const nowUnix = Math.floor(Date.now() / 1000);
+  return (json.models ?? []).map((m) => ({
+    id: m.id,
+    object: 'model',
+    created: nowUnix,
+    owned_by: m.brand,
+  }));
 }
 
 export async function getModels(): Promise<UpstreamModel[]> {
@@ -61,8 +59,7 @@ export async function getModels(): Promise<UpstreamModel[]> {
   }
 
   try {
-    const baseModels = await fetchFromUpstream();
-    const models = expandWithVariants(baseModels);
+    const models = await fetchFromUpstream();
     cache = { models, fetchedAt: now };
     return models;
   } catch (err) {
