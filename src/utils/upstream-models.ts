@@ -17,7 +17,7 @@ interface CacheEntry {
 let cache: CacheEntry | null = null;
 
 async function fetchFromUpstream(): Promise<UpstreamModel[]> {
-  const url = `${config.upstreamUrl}/v1/models`;
+  const url = `${config.upstreamUrl}/api/models`;
   const timeout = AbortSignal.timeout(config.upstreamTimeoutMs);
 
   const res = await fetch(url, {

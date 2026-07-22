@@ -70,7 +70,7 @@ if (redactEnabled && redactCategories.length === 0) {
 export const config = {
   port: intEnv('PORT', 3000),
   host: process.env.HOST || '0.0.0.0',
-  upstreamUrl: process.env.UPSTREAM_URL || 'https://olliechat-lac.vercel.app/',
+  upstreamUrl: process.env.UPSTREAM_URL || 'https://olliechat-iota.vercel.app/',
   /** Upstream request timeout in milliseconds. */
   upstreamTimeoutMs: intEnv('UPSTREAM_TIMEOUT_MS', 120_000),
   /** Maximum request body size in bytes (Fastify `bodyLimit`). */
