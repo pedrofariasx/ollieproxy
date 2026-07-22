@@ -83,9 +83,10 @@ export async function chatRoutes(app: FastifyInstance) {
     const redactor = config.redact.enabled
       ? new Redactor(config.redact.categories)
       : null;
-    const messagesForUpstream = redactor
+    const messagesForUpstream = (redactor
       ? redactMessages(body.messages, redactor)
-      : body.messages;
+      : body.messages
+    ).map(sanitizeMessage);
 
     const upstreamBody: Record<string, unknown> = {
       model: baseModel,
@@ -501,6 +502,16 @@ async function readLimited(response: Response, limit: number): Promise<string> {
  * Tool-message `content` is also redacted since assistant tool results can
  * echo PII back.
  */
+function sanitizeMessage(msg: ChatMessageType): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(msg)) {
+    if (value === null || value === undefined) continue;
+    if (key === 'content' && value === '') continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 function redactMessages(
   messages: ChatCompletionRequestType['messages'],
   redactor: Redactor,
